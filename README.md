@@ -3,7 +3,12 @@
 ### Prerequisites
 * ubuntu machine
 
-
+```shell
+curl -fsSLO https://github.com/Superm4n97/locally/blob/master/locally
+sudo rm -rf /home/$USER/bin/locally
+sudo mv ./locally /home/$USER/bin
+```
+---
 ## Commands
 
 ```bash

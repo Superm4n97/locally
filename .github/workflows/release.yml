@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o locally-${{ matrix.goos }}-${{ matrix.goarch }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            locally-*
