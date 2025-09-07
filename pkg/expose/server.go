@@ -23,7 +23,7 @@ func StartExposeServer(port int) error {
 	if err != nil {
 		return err
 	}
-	klog.Infof("Starting exposing server on %s:%d", myip, port)
+	klog.Infof("Starting exposing server on http://%s:%d", myip, port)
 
 	if err = util.PrintQRCode(fmt.Sprintf("http://%s:%d", myip, port)); err != nil {
 		return err
