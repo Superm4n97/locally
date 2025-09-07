@@ -1,12 +1,21 @@
 # whoserve
 ## Download
-### Prerequisites
-* ubuntu machine
-
+### linux
 ```shell
-curl -fsSLO https://github.com/Superm4n97/locally/blob/master/locally
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.0.2/locally-linux-amd64
+chmod +x locally
 sudo rm -rf /home/$USER/bin/locally
 sudo mv ./locally /home/$USER/bin
+```
+### darwin
+```shell
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.0.2/locally-darwin-amd64
+chmod +x locally
+```
+### windows
+```shell
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.0.2/locally-windows-amd64
+chmod +x locally
 ```
 ---
 ## Commands
