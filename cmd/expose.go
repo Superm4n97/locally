@@ -1,40 +1,27 @@
 package cmd
 
 import (
-	"fmt"
-	"os/exec"
-	"strings"
-
+	"github.com/Superm4n97/whoserve/pkg/expose"
 	"github.com/spf13/cobra"
 )
 
+var port int
+
 var exposeCmd = &cobra.Command{
 	Use:   "expose",
-	Short: "Expose a running servers (listening ports)",
+	Short: "Expose a server serving your current directory",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Try `ss -tulnp` (works on most modern Linux distros)
-		out, err := exec.Command("ss", "-tulnp").CombinedOutput()
-		if err != nil {
-			fmt.Println("Error running ss command:", err)
-			return
-		}
-
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "LISTEN") {
-				fmt.Println(line)
-			}
+		if err := expose.StartExposeServer(port); err != nil {
+			panic(err)
 		}
 	},
 }
 
-func addFlags() {
-	var port string
-	exposeCmd.Flags().StringVarP(&port, "port", "p", "", "port number where the server is running on")
-	exposeCmd.MarkFlagRequired("port")
+func addExposeFlags() {
+	exposeCmd.Flags().IntVarP(&port, "port", "p", 8000, "port number where the target server is running on")
 }
 
 func init() {
 	rootCmd.AddCommand(exposeCmd)
-	addFlags()
+	addExposeFlags()
 }
