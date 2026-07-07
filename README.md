@@ -2,19 +2,19 @@
 ## Download
 ### linux
 ```shell
-curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.0.2/locally-linux-amd64
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.1.0/locally-linux-amd64
 chmod +x locally
 sudo rm -rf /home/$USER/bin/locally
 sudo mv ./locally /home/$USER/bin
 ```
 ### darwin
 ```shell
-curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.0.2/locally-darwin-amd64
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.1.0/locally-darwin-amd64
 chmod +x locally
 ```
 ### windows
 ```shell
-curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.0.2/locally-windows-amd64
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.1.0/locally-windows-amd64
 chmod +x locally
 ```
 ---
