@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>locally — {{.Path}}</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1a1d21;
+    --muted: #6b7280;
+    --border: #e2e5e9;
+    --accent: #2563eb;
+    --accent-soft: #eff4ff;
+    --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101318;
+      --card: #191d24;
+      --text: #e8eaed;
+      --muted: #9aa2ad;
+      --border: #2a2f38;
+      --accent: #5b8def;
+      --accent-soft: #1c2536;
+      --danger: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand { font-weight: 700; font-size: 1.05rem; }
+  .brand small { font-weight: 400; color: var(--muted); margin-left: 8px; }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; }
+  .breadcrumbs {
+    margin-bottom: 16px;
+    font-size: 0.95rem;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .breadcrumbs a { color: var(--accent); text-decoration: none; }
+  .breadcrumbs a:hover { text-decoration: underline; }
+  .breadcrumbs .sep { color: var(--muted); margin: 0 6px; }
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    background: var(--card);
+    padding: 22px;
+    text-align: center;
+    margin-bottom: 20px;
+    transition: border-color .15s, background .15s;
+  }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+  .dropzone p { margin: 6px 0; color: var(--muted); }
+  .dropzone p strong { color: var(--text); }
+  .dropzone button {
+    margin-top: 4px;
+    padding: 8px 18px;
+    font-size: 0.95rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  .dropzone button:hover { filter: brightness(1.1); }
+  .progress-wrap {
+    margin: 14px auto 0;
+    max-width: 420px;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    width: 0;
+    border-radius: 4px;
+    background: var(--accent);
+    transition: width .15s;
+  }
+  .status { min-height: 1.2em; font-size: 0.9rem; }
+  .status.error { color: var(--danger); }
+  table.listing {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .listing th, .listing td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.95rem;
+  }
+  .listing th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .listing tr:last-child td { border-bottom: none; }
+  .listing tbody tr:hover { background: var(--accent-soft); }
+  .listing a { color: var(--text); text-decoration: none; }
+  .listing a:hover { color: var(--accent); }
+  .listing td.meta { color: var(--muted); white-space: nowrap; }
+  .listing td.empty { text-align: center; color: var(--muted); padding: 28px; }
+  @media (max-width: 560px) {
+    .listing th:nth-child(3), .listing td:nth-child(3) { display: none; }
+  }
+</style>
+</head>
+<body data-dir="{{.Path}}">
+<header>
+  <div class="brand">📡 locally <small>shared folder</small></div>
+</header>
+<main>
+  <nav class="breadcrumbs">
+    {{range $i, $b := .Breadcrumbs}}{{if $i}}<span class="sep">/</span>{{end}}<a href="{{$b.Href}}">{{$b.Name}}</a>{{end}}
+  </nav>
+
+  <section id="dropzone" class="dropzone">
+    <p><strong>Drop files here</strong> to upload to this folder, or</p>
+    <button id="pick" type="button">Choose files</button>
+    <input id="file-input" type="file" multiple hidden>
+    <div id="progress-wrap" class="progress-wrap" hidden>
+      <div id="progress-bar" class="progress-bar"></div>
+    </div>
+    <p id="status" class="status"></p>
+  </section>
+
+  <table class="listing">
+    <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+    <tbody>
+      {{range .Entries}}
+      <tr>
+        <td><a href="{{.Href}}">{{if .IsDir}}📁{{else}}📄{{end}} {{.Name}}{{if .IsDir}}/{{end}}</a></td>
+        <td class="meta">{{.Size}}</td>
+        <td class="meta">{{.ModTime}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="3" class="empty">This folder is empty</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</main>
+<script>
+(function () {
+  var dir = document.body.dataset.dir;
+  var input = document.getElementById('file-input');
+  var drop = document.getElementById('dropzone');
+  var bar = document.getElementById('progress-bar');
+  var wrap = document.getElementById('progress-wrap');
+  var status = document.getElementById('status');
+
+  document.getElementById('pick').addEventListener('click', function () { input.click(); });
+  input.addEventListener('change', function () { upload(input.files); });
+
+  ['dragover', 'dragenter'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('drag'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('drag'); });
+  });
+  drop.addEventListener('drop', function (e) { upload(e.dataTransfer.files); });
+
+  function upload(files) {
+    if (!files || files.length === 0) return;
+    var form = new FormData();
+    for (var i = 0; i < files.length; i++) form.append('file', files[i], files[i].name);
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload?dir=' + encodeURIComponent(dir));
+    wrap.hidden = false;
+    bar.style.width = '0';
+    status.classList.remove('error');
+    status.textContent = 'Uploading ' + files.length + ' file(s)…';
+
+    xhr.upload.addEventListener('progress', function (e) {
+      if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%';
+    });
+    xhr.addEventListener('load', function () {
+      if (xhr.status === 200) {
+        status.textContent = 'Done. Refreshing…';
+        location.reload();
+      } else {
+        wrap.hidden = true;
+        status.classList.add('error');
+        status.textContent = 'Upload failed: ' + xhr.responseText;
+      }
+    });
+    xhr.addEventListener('error', function () {
+      wrap.hidden = true;
+      status.classList.add('error');
+      status.textContent = 'Upload failed: network error';
+    });
+    xhr.send(form);
+  }
+})();
+</script>
+</body>
+</html>

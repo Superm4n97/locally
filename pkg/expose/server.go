@@ -15,9 +15,11 @@ func StartExposeServer(port int) error {
 		return err
 	}
 
-	// Serve current directory (".")
-	fs := http.FileServer(http.Dir("."))
-	http.Handle("/", fs)
+	// Serve current directory (".") with a browsable UI and upload support
+	handler, err := NewHandler(".")
+	if err != nil {
+		return err
+	}
 
 	myip, err := util.MyIP()
 	if err != nil {
@@ -30,9 +32,5 @@ func StartExposeServer(port int) error {
 	}
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	if err = http.ListenAndServe(addr, nil); err != nil {
-		panic(err)
-	}
-
-	return nil
+	return http.ListenAndServe(addr, handler)
 }

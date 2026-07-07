@@ -16,7 +16,7 @@ func ValidatePort(ports ...PortInput) error {
 			return fmt.Errorf("invalid port %d", p.Port)
 		}
 		if p.Port < 1023 {
-			klog.Warningf("%s trying to use privileged port: %d", p.Port, p.Port)
+			klog.Warningf("%s trying to use privileged port: %d", p.Name, p.Port)
 		}
 	}
 	return nil

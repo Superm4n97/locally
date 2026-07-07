@@ -41,6 +41,8 @@ locally expose
 ```
 ### description
 Exposes the current directory. You can access your computer from any device within your network.
+Opening the URL in a browser shows a file browser UI where you can navigate folders, download files,
+and upload files into the shared directory (drag & drop or file picker).
 
 ### flags
 * `port` is an `optional` flag to specify the server port. Default serving port is `8000`.
@@ -48,6 +50,18 @@ Exposes the current directory. You can access your computer from any device with
 ### output
 * A QR code to scan from mobile
 * IP address to access from other computer
+
+### upload API
+Files can also be uploaded from the command line:
+
+```bash
+curl -X POST "http://<ip>:8000/api/upload?dir=/some/subdir" -F "file=@./my-file.txt"
+```
+
+* `dir` is the directory (relative to the shared root) to upload into; defaults to the root.
+* Multiple `file` fields can be sent in a single request.
+* Name collisions are resolved automatically (`file.txt` → `file (1).txt`); existing files are never overwritten.
+* Paths are confined to the shared directory — traversal attempts are rejected.
 
 ---
 ```bash

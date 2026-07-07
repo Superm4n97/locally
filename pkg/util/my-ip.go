@@ -41,7 +41,7 @@ func MyIP() (string, error) {
 	}
 
 	if ipAddr == "" {
-		err = fmt.Errorf("No IPv4 address found for", ifaceName)
+		err = fmt.Errorf("no IPv4 address found for %s", ifaceName)
 		fmt.Println(err.Error())
 		return "", err
 	}
