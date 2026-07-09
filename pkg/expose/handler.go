@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/klog/v2"
 )
@@ -75,7 +76,7 @@ func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, fsPath)
 		return
 	}
-	s.renderListing(w, r.URL.Path, fsPath)
+	s.renderListing(w, r, fsPath)
 }
 
 type breadcrumb struct {
@@ -87,55 +88,137 @@ type entry struct {
 	Name    string
 	Href    string
 	IsDir   bool
+	Kind    string // "dir", "image", "video", "doc" or "other"
 	Size    string
 	ModTime string
+	modTime time.Time
+}
+
+// monthGroup is a run of files sharing the same month and year,
+// rendered under a single sticky "January 2026"-style heading.
+type monthGroup struct {
+	Label   string
+	Entries []entry
 }
 
 type pageData struct {
 	Path        string
 	Breadcrumbs []breadcrumb
-	Entries     []entry
+	Filter      string
+	Dirs        []entry
+	Groups      []monthGroup
 }
 
-func (s *server) renderListing(w http.ResponseWriter, urlPath, fsPath string) {
+// kindByExt classifies files by extension. Covers the formats iPhone
+// (HEIC/MOV) and Android (JPG/MP4/3GP) cameras produce, plus common
+// document types.
+var kindByExt = map[string]string{
+	".jpg": "image", ".jpeg": "image", ".png": "image", ".gif": "image",
+	".webp": "image", ".bmp": "image", ".svg": "image", ".avif": "image",
+	".heic": "image", ".heif": "image", ".tif": "image", ".tiff": "image",
+
+	".mp4": "video", ".mov": "video", ".m4v": "video", ".webm": "video",
+	".mkv": "video", ".avi": "video", ".3gp": "video", ".3g2": "video",
+	".mts": "video", ".wmv": "video",
+
+	".pdf": "doc", ".doc": "doc", ".docx": "doc", ".xls": "doc",
+	".xlsx": "doc", ".ppt": "doc", ".pptx": "doc", ".odt": "doc",
+	".ods": "doc", ".odp": "doc", ".txt": "doc", ".md": "doc",
+	".csv": "doc", ".rtf": "doc",
+}
+
+func fileKind(name string) string {
+	if kind, ok := kindByExt[strings.ToLower(filepath.Ext(name))]; ok {
+		return kind
+	}
+	return "other"
+}
+
+// filterKinds maps the ?filter= query values to the file kind they keep.
+var filterKinds = map[string]string{
+	"photos": "image",
+	"videos": "video",
+	"docs":   "doc",
+}
+
+func (s *server) renderListing(w http.ResponseWriter, r *http.Request, fsPath string) {
+	filter := r.URL.Query().Get("filter")
+	if _, ok := filterKinds[filter]; !ok {
+		filter = "all"
+	}
+
 	dirEntries, err := os.ReadDir(fsPath)
 	if err != nil {
 		http.Error(w, "failed to read directory", http.StatusInternalServerError)
 		return
 	}
 
-	cleaned := path.Clean("/" + urlPath)
-	entries := make([]entry, 0, len(dirEntries))
+	cleaned := path.Clean("/" + r.URL.Path)
+	var dirs, files []entry
 	for _, de := range dirEntries {
+		// Hidden files and directories (dotfiles) are not listed.
+		if strings.HasPrefix(de.Name(), ".") {
+			continue
+		}
 		e := entry{
 			Name:  de.Name(),
 			Href:  (&url.URL{Path: path.Join(cleaned, de.Name())}).EscapedPath(),
 			IsDir: de.IsDir(),
+			Kind:  "dir",
 			Size:  "—",
 		}
 		if info, err := de.Info(); err == nil {
-			e.ModTime = info.ModTime().Format("Jan 02, 2006 15:04")
+			e.modTime = info.ModTime()
+			e.ModTime = e.modTime.Format("Jan 02, 2006 15:04")
 			if !de.IsDir() {
 				e.Size = formatSize(info.Size())
 			}
 		}
-		entries = append(entries, e)
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir != entries[j].IsDir {
-			return entries[i].IsDir
+		if de.IsDir() {
+			dirs = append(dirs, e)
+			continue
 		}
-		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+		e.Kind = fileKind(de.Name())
+		if filter != "all" && e.Kind != filterKinds[filter] {
+			continue
+		}
+		files = append(files, e)
+	}
+
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.ToLower(dirs[i].Name) < strings.ToLower(dirs[j].Name)
+	})
+	sort.Slice(files, func(i, j int) bool {
+		if !files[i].modTime.Equal(files[j].modTime) {
+			return files[i].modTime.After(files[j].modTime)
+		}
+		return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
 	})
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := indexTmpl.Execute(w, pageData{
 		Path:        cleaned,
 		Breadcrumbs: breadcrumbsFor(cleaned),
-		Entries:     entries,
+		Filter:      filter,
+		Dirs:        dirs,
+		Groups:      groupByMonth(files),
 	}); err != nil {
 		klog.Errorf("failed to render listing for %s: %v", cleaned, err)
 	}
+}
+
+// groupByMonth splits files (already sorted newest-first) into
+// consecutive month-and-year groups.
+func groupByMonth(files []entry) []monthGroup {
+	var groups []monthGroup
+	for _, e := range files {
+		label := e.modTime.Format("January 2006")
+		if len(groups) == 0 || groups[len(groups)-1].Label != label {
+			groups = append(groups, monthGroup{Label: label})
+		}
+		groups[len(groups)-1].Entries = append(groups[len(groups)-1].Entries, e)
+	}
+	return groups
 }
 
 func breadcrumbsFor(cleanedPath string) []breadcrumb {

@@ -6,3 +6,11 @@ ARCH := $(if $(GOARCH),$(GOARCH),$(shell go env GOARCH))
 
 build:
 	@go build -o $(BIN)
+
+run:
+	@go run . expose
+
+test:
+	@go test ./pkg/... ./cmd/...
+
+.PHONY: build run test

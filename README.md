@@ -1,4 +1,12 @@
-# whoserve
+# locally
+## Development
+
+```bash
+make run    # run the server (exposes the current directory on :8000)
+make test   # run unit tests
+make build  # build the `locally` binary
+```
+
 ## Download
 ### linux
 ```shell
@@ -43,6 +51,28 @@ locally expose
 Exposes the current directory. You can access your computer from any device within your network.
 Opening the URL in a browser shows a file browser UI where you can navigate folders, download files,
 and upload files into the shared directory (drag & drop or file picker).
+
+The browser UI is built for photo/video dumps from phones:
+
+* **Inline previews** — images and videos render as thumbnails directly in the listing;
+  no clicking needed to see what a file is. Video thumbnails show a frame from the middle
+  of the clip rather than the (often black) first frame. Covers both iPhone (HEIC, MOV)
+  and Android (JPG, MP4, 3GP) formats. Formats the browser cannot decode (e.g. HEIC on
+  non-Safari) fall back to an icon.
+* **Timeline sorting** — files are sorted newest-first and grouped under sticky
+  month headers (e.g. *March 2026*), so the month and year stay visible while you scroll.
+* **Type filters** — chips at the top filter the listing by content type:
+
+  | Filter | URL | Keeps |
+  |--------|-----|-------|
+  | All | `/?` | everything |
+  | Photos | `/?filter=photos` | jpg, jpeg, png, gif, webp, heic, heif, bmp, svg, avif, tif(f) |
+  | Videos | `/?filter=videos` | mp4, mov, m4v, webm, mkv, avi, 3gp, 3g2, mts, wmv |
+  | Docs | `/?filter=docs` | pdf, doc(x), xls(x), ppt(x), odt, ods, odp, txt, md, csv, rtf |
+
+  Directories always stay visible so you can keep navigating while a filter is active.
+
+Hidden files and directories (names starting with `.`) are excluded from the listing.
 
 ### flags
 * `port` is an `optional` flag to specify the server port. Default serving port is `8000`.

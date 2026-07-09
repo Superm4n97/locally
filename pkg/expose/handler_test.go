@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newTestHandler creates a handler serving a temp directory seeded with:
@@ -304,6 +305,198 @@ func TestSanitizeFilename(t *testing.T) {
 		if got := sanitizeFilename(c.in); got != c.want {
 			t.Errorf("sanitizeFilename(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestFileKind(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"IMG_0001.JPG", "image"},
+		{"photo.jpeg", "image"},
+		{"shot.png", "image"},
+		{"iphone.HEIC", "image"},
+		{"clip.mp4", "video"},
+		{"iphone.MOV", "video"},
+		{"android.3gp", "video"},
+		{"report.pdf", "doc"},
+		{"letter.docx", "doc"},
+		{"sheet.xlsx", "doc"},
+		{"notes.txt", "doc"},
+		{"archive.zip", "other"},
+		{"binary", "other"},
+	}
+	for _, c := range cases {
+		if got := fileKind(c.name); got != c.want {
+			t.Errorf("fileKind(%q) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// seedMedia writes a mix of media files into root with distinct mod times.
+func seedMedia(t *testing.T, root string) {
+	t.Helper()
+	files := map[string]time.Time{
+		"photo.jpg": time.Date(2026, time.March, 15, 10, 0, 0, 0, time.Local),
+		"video.mp4": time.Date(2026, time.March, 2, 9, 0, 0, 0, time.Local),
+		"doc.pdf":   time.Date(2025, time.December, 25, 8, 0, 0, 0, time.Local),
+		"blob.bin":  time.Date(2025, time.December, 1, 7, 0, 0, 0, time.Local),
+	}
+	for name, mt := range files {
+		p := filepath.Join(root, name)
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestFilterPhotos(t *testing.T) {
+	h, root := newTestHandler(t)
+	seedMedia(t, root)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?filter=photos", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "photo.jpg") {
+		t.Error("photos filter dropped photo.jpg")
+	}
+	for _, unwanted := range []string{"video.mp4", "doc.pdf", "blob.bin", "hello.txt"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("photos filter kept %q", unwanted)
+		}
+	}
+	if !strings.Contains(body, "sub") {
+		t.Error("photos filter hid directories; they must stay navigable")
+	}
+}
+
+func TestFilterVideosAndDocs(t *testing.T) {
+	h, root := newTestHandler(t)
+	seedMedia(t, root)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?filter=videos", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "video.mp4") || strings.Contains(body, "photo.jpg") {
+		t.Error("videos filter returned wrong entries")
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?filter=docs", nil))
+	body = rec.Body.String()
+	if !strings.Contains(body, "doc.pdf") || !strings.Contains(body, "hello.txt") {
+		t.Error("docs filter dropped document files")
+	}
+	if strings.Contains(body, "photo.jpg") || strings.Contains(body, "blob.bin") {
+		t.Error("docs filter kept non-document files")
+	}
+}
+
+func TestInvalidFilterFallsBackToAll(t *testing.T) {
+	h, root := newTestHandler(t)
+	seedMedia(t, root)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?filter=bogus", nil))
+
+	body := rec.Body.String()
+	for _, want := range []string{"photo.jpg", "video.mp4", "doc.pdf", "blob.bin"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("invalid filter should show everything, missing %q", want)
+		}
+	}
+}
+
+func TestListingSortedNewestFirstWithMonthHeaders(t *testing.T) {
+	h, root := newTestHandler(t)
+	seedMedia(t, root)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	march := strings.Index(body, "March 2026")
+	december := strings.Index(body, "December 2025")
+	if march == -1 || december == -1 {
+		t.Fatalf("month headers missing: march=%d december=%d", march, december)
+	}
+	if march > december {
+		t.Error("March 2026 must appear before December 2025 (newest first)")
+	}
+	photo := strings.Index(body, "photo.jpg")
+	video := strings.Index(body, "video.mp4")
+	if photo == -1 || video == -1 || photo > video {
+		t.Error("within a month, newer files must come first")
+	}
+}
+
+func TestGroupByMonth(t *testing.T) {
+	mk := func(y int, m time.Month, d int) entry {
+		return entry{modTime: time.Date(y, m, d, 0, 0, 0, 0, time.UTC)}
+	}
+	groups := groupByMonth([]entry{
+		mk(2026, time.March, 20),
+		mk(2026, time.March, 1),
+		mk(2026, time.January, 5),
+		mk(2025, time.December, 31),
+	})
+	wantLabels := []string{"March 2026", "January 2026", "December 2025"}
+	if len(groups) != len(wantLabels) {
+		t.Fatalf("got %d groups, want %d", len(groups), len(wantLabels))
+	}
+	for i, want := range wantLabels {
+		if groups[i].Label != want {
+			t.Errorf("group[%d].Label = %q, want %q", i, groups[i].Label, want)
+		}
+	}
+	if len(groups[0].Entries) != 2 {
+		t.Errorf("March 2026 group has %d entries, want 2", len(groups[0].Entries))
+	}
+
+	if got := groupByMonth(nil); got != nil {
+		t.Errorf("groupByMonth(nil) = %v, want nil", got)
+	}
+}
+
+func TestHiddenFilesNotListed(t *testing.T) {
+	h, root := newTestHandler(t)
+	if err := os.WriteFile(filepath.Join(root, ".hidden.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	for _, unwanted := range []string{".hidden.txt", ".config"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("listing shows hidden entry %q", unwanted)
+		}
+	}
+	if !strings.Contains(body, "hello.txt") {
+		t.Error("listing dropped visible file hello.txt")
+	}
+}
+
+func TestMediaRendersInlinePreviews(t *testing.T) {
+	h, root := newTestHandler(t)
+	seedMedia(t, root)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<img loading="lazy" src="/photo.jpg"`) {
+		t.Error("image entry missing inline <img> thumbnail")
+	}
+	if !strings.Contains(body, `src="/video.mp4"`) || !strings.Contains(body, "<video") {
+		t.Error("video entry missing inline <video> preview")
 	}
 }
 

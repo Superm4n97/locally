@@ -14,6 +14,7 @@
     --accent: #2563eb;
     --accent-soft: #eff4ff;
     --danger: #dc2626;
+    --tile-bg: #e9ebee;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -25,6 +26,7 @@
       --accent: #5b8def;
       --accent-soft: #1c2536;
       --danger: #f87171;
+      --tile-bg: #22262e;
     }
   }
   * { box-sizing: border-box; }
@@ -44,9 +46,9 @@
   }
   .brand { font-weight: 700; font-size: 1.05rem; }
   .brand small { font-weight: 400; color: var(--muted); margin-left: 8px; }
-  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; }
+  main { max-width: 980px; margin: 0 auto; padding: 20px 16px 48px; }
   .breadcrumbs {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     font-size: 0.95rem;
     overflow-x: auto;
     white-space: nowrap;
@@ -54,11 +56,34 @@
   .breadcrumbs a { color: var(--accent); text-decoration: none; }
   .breadcrumbs a:hover { text-decoration: underline; }
   .breadcrumbs .sep { color: var(--muted); margin: 0 6px; }
+  .filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+  }
+  .chip {
+    padding: 6px 16px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
   .dropzone {
     border: 2px dashed var(--border);
     border-radius: 12px;
     background: var(--card);
-    padding: 22px;
+    padding: 18px;
     text-align: center;
     margin-bottom: 20px;
     transition: border-color .15s, background .15s;
@@ -94,35 +119,106 @@
   }
   .status { min-height: 1.2em; font-size: 0.9rem; }
   .status.error { color: var(--danger); }
-  table.listing {
-    width: 100%;
-    border-collapse: collapse;
+
+  .folders {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
+    margin-bottom: 20px;
   }
-  .listing th, .listing td {
-    text-align: left;
+  .folders a {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
+    color: var(--text);
+    text-decoration: none;
     font-size: 0.95rem;
   }
-  .listing th {
-    color: var(--muted);
-    font-weight: 600;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: .04em;
+  .folders a:last-child { border-bottom: none; }
+  .folders a:hover { background: var(--accent-soft); }
+  .folders .meta { color: var(--muted); white-space: nowrap; font-size: 0.85rem; }
+
+  .month {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0 -16px;
+    padding: 10px 16px;
+    font-size: 1rem;
+    font-weight: 700;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
   }
-  .listing tr:last-child td { border-bottom: none; }
-  .listing tbody tr:hover { background: var(--accent-soft); }
-  .listing a { color: var(--text); text-decoration: none; }
-  .listing a:hover { color: var(--accent); }
-  .listing td.meta { color: var(--muted); white-space: nowrap; }
-  .listing td.empty { text-align: center; color: var(--muted); padding: 28px; }
-  @media (max-width: 560px) {
-    .listing th:nth-child(3), .listing td:nth-child(3) { display: none; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 14px 0 26px;
+  }
+  .tile {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .tile:hover { border-color: var(--accent); }
+  .thumb {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    background: var(--tile-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .thumb img, .thumb video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .thumb .icon { font-size: 2.6rem; }
+  .thumb .play {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    color: #fff;
+    text-shadow: 0 1px 6px rgba(0,0,0,.6);
+    pointer-events: none;
+  }
+  .tile-name {
+    display: block;
+    padding: 6px 8px 2px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tile-meta {
+    display: block;
+    padding: 0 8px 8px;
+    font-size: 0.72rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 32px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
   }
 </style>
 </head>
@@ -135,6 +231,13 @@
     {{range $i, $b := .Breadcrumbs}}{{if $i}}<span class="sep">/</span>{{end}}<a href="{{$b.Href}}">{{$b.Name}}</a>{{end}}
   </nav>
 
+  <nav class="filters">
+    <a class="chip{{if eq .Filter "all"}} active{{end}}" href="?">All</a>
+    <a class="chip{{if eq .Filter "photos"}} active{{end}}" href="?filter=photos">🖼 Photos</a>
+    <a class="chip{{if eq .Filter "videos"}} active{{end}}" href="?filter=videos">🎬 Videos</a>
+    <a class="chip{{if eq .Filter "docs"}} active{{end}}" href="?filter=docs">📄 Docs</a>
+  </nav>
+
   <section id="dropzone" class="dropzone">
     <p><strong>Drop files here</strong> to upload to this folder, or</p>
     <button id="pick" type="button">Choose files</button>
@@ -145,20 +248,35 @@
     <p id="status" class="status"></p>
   </section>
 
-  <table class="listing">
-    <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
-    <tbody>
-      {{range .Entries}}
-      <tr>
-        <td><a href="{{.Href}}">{{if .IsDir}}📁{{else}}📄{{end}} {{.Name}}{{if .IsDir}}/{{end}}</a></td>
-        <td class="meta">{{.Size}}</td>
-        <td class="meta">{{.ModTime}}</td>
-      </tr>
-      {{else}}
-      <tr><td colspan="3" class="empty">This folder is empty</td></tr>
-      {{end}}
-    </tbody>
-  </table>
+  {{if .Dirs}}
+  <section class="folders">
+    {{range .Dirs}}
+    <a href="{{.Href}}"><span>📁 {{.Name}}/</span><span class="meta">{{.ModTime}}</span></a>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{range .Groups}}
+  <h2 class="month">{{.Label}}</h2>
+  <div class="grid">
+    {{range .Entries}}
+    <a class="tile" href="{{.Href}}" title="{{.Name}} — {{.ModTime}}">
+      <span class="thumb">
+        {{if eq .Kind "image"}}<img loading="lazy" src="{{.Href}}" alt="{{.Name}}">
+        {{else if eq .Kind "video"}}<video preload="metadata" muted playsinline src="{{.Href}}"></video><span class="play">▶</span>
+        {{else if eq .Kind "doc"}}<span class="icon">📄</span>
+        {{else}}<span class="icon">📦</span>{{end}}
+      </span>
+      <span class="tile-name">{{.Name}}</span>
+      <span class="tile-meta">{{.Size}} · {{.ModTime}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if not .Groups}}{{if not .Dirs}}
+  <p class="empty">{{if eq .Filter "all"}}This folder is empty{{else}}No {{.Filter}} in this folder{{end}}</p>
+  {{end}}{{end}}
 </main>
 <script>
 (function () {
@@ -168,6 +286,23 @@
   var bar = document.getElementById('progress-bar');
   var wrap = document.getElementById('progress-wrap');
   var status = document.getElementById('status');
+
+  // Browsers that cannot decode a format (e.g. HEIC) fall back to an icon.
+  document.querySelectorAll('.thumb img').forEach(function (img) {
+    img.addEventListener('error', function () {
+      var icon = document.createElement('span');
+      icon.className = 'icon';
+      icon.textContent = '🖼';
+      img.replaceWith(icon);
+    });
+  });
+
+  // Preview the middle of each video instead of its (often black) first frame.
+  document.querySelectorAll('.thumb video').forEach(function (v) {
+    v.addEventListener('loadedmetadata', function () {
+      if (isFinite(v.duration) && v.duration > 0) v.currentTime = v.duration / 2;
+    });
+  });
 
   document.getElementById('pick').addEventListener('click', function () { input.click(); });
   input.addEventListener('change', function () { upload(input.files); });
