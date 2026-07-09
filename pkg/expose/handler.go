@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,13 +30,33 @@ var indexTmpl = template.Must(template.New("index").Parse(indexHTML))
 // anything beyond it is spooled to temporary files by net/http.
 const maxUploadMemory = 32 << 20
 
+// pageSize is how many files a single listing page shows. Directories are
+// always shown in full on the first page.
+const pageSize = 100
+
+// maxConcurrentThumbs bounds simultaneous thumbnail generations (image
+// decodes and ffmpeg processes).
+const maxConcurrentThumbs = 4
+
 type server struct {
-	root string
+	root     string
+	thumbDir string
+	ffmpeg   string // path to ffmpeg binary, "" if not installed
+	ffprobe  string // path to ffprobe binary, "" if not installed
+	thumbSem chan struct{}
 }
 
 // NewHandler returns a handler that serves a browsable listing of root,
 // serves its files for download, and accepts uploads on POST /api/upload.
 func NewHandler(root string) (http.Handler, error) {
+	s, err := newServer(root)
+	if err != nil {
+		return nil, err
+	}
+	return s.routes(), nil
+}
+
+func newServer(root string) (*server, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -47,11 +69,32 @@ func NewHandler(root string) (http.Handler, error) {
 		return nil, fmt.Errorf("%s is not a directory", abs)
 	}
 
-	s := &server{root: abs}
+	s := &server{
+		root:     abs,
+		thumbDir: defaultThumbDir(),
+		thumbSem: make(chan struct{}, maxConcurrentThumbs),
+	}
+	if err := os.MkdirAll(s.thumbDir, 0o755); err != nil {
+		return nil, fmt.Errorf("cannot create thumbnail cache %s: %w", s.thumbDir, err)
+	}
+	if p, err := exec.LookPath("ffmpeg"); err == nil {
+		s.ffmpeg = p
+	}
+	if p, err := exec.LookPath("ffprobe"); err == nil {
+		s.ffprobe = p
+	}
+	if s.ffmpeg == "" {
+		klog.Info("ffmpeg not found; video previews fall back to in-browser loading")
+	}
+	return s, nil
+}
+
+func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/upload", s.handleUpload)
+	mux.HandleFunc("/api/thumb", s.handleThumb)
 	mux.HandleFunc("/", s.handleBrowse)
-	return mux, nil
+	return mux
 }
 
 // resolve maps a URL path to a filesystem path inside the served root.
@@ -73,6 +116,10 @@ func (s *server) handleBrowse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !info.IsDir() {
+		// Media files are immutable while shared; let browsers cache them
+		// so revisits and back-navigation are instant. ServeFile still
+		// honors If-Modified-Since on top of this.
+		w.Header().Set("Cache-Control", "public, max-age=3600")
 		http.ServeFile(w, r, fsPath)
 		return
 	}
@@ -85,13 +132,14 @@ type breadcrumb struct {
 }
 
 type entry struct {
-	Name    string
-	Href    string
-	IsDir   bool
-	Kind    string // "dir", "image", "video", "doc" or "other"
-	Size    string
-	ModTime string
-	modTime time.Time
+	Name      string
+	Href      string
+	ThumbHref string // preview endpoint URL; set for images and videos
+	IsDir     bool
+	Kind      string // "dir", "image", "video", "doc" or "other"
+	Size      string
+	ModTime   string
+	modTime   time.Time
 }
 
 // monthGroup is a run of files sharing the same month and year,
@@ -107,6 +155,9 @@ type pageData struct {
 	Filter      string
 	Dirs        []entry
 	Groups      []monthGroup
+	VideoPoster bool   // ffmpeg is available: render video tiles as static posters
+	PrevHref    string // link to the newer page, "" on the first page
+	NextHref    string // link to the older page, "" on the last page
 }
 
 // kindByExt classifies files by extension. Covers the formats iPhone
@@ -146,6 +197,10 @@ func (s *server) renderListing(w http.ResponseWriter, r *http.Request, fsPath st
 	if _, ok := filterKinds[filter]; !ok {
 		filter = "all"
 	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
 
 	dirEntries, err := os.ReadDir(fsPath)
 	if err != nil {
@@ -182,6 +237,9 @@ func (s *server) renderListing(w http.ResponseWriter, r *http.Request, fsPath st
 		if filter != "all" && e.Kind != filterKinds[filter] {
 			continue
 		}
+		if e.Kind == "image" || e.Kind == "video" {
+			e.ThumbHref = "/api/thumb?path=" + url.QueryEscape(path.Join(cleaned, de.Name()))
+		}
 		files = append(files, e)
 	}
 
@@ -195,6 +253,15 @@ func (s *server) renderListing(w http.ResponseWriter, r *http.Request, fsPath st
 		return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
 	})
 
+	files, prevHref, nextHref := paginate(files, filter, page)
+	if page > 1 {
+		// Directories are only shown alongside the newest files.
+		dirs = nil
+	}
+
+	// The listing itself must always be revalidated: uploads and filesystem
+	// changes have to show up on refresh.
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := indexTmpl.Execute(w, pageData{
 		Path:        cleaned,
@@ -202,9 +269,42 @@ func (s *server) renderListing(w http.ResponseWriter, r *http.Request, fsPath st
 		Filter:      filter,
 		Dirs:        dirs,
 		Groups:      groupByMonth(files),
+		VideoPoster: s.ffmpeg != "",
+		PrevHref:    prevHref,
+		NextHref:    nextHref,
 	}); err != nil {
 		klog.Errorf("failed to render listing for %s: %v", cleaned, err)
 	}
+}
+
+// paginate returns the slice of files for page (1-based) plus links to the
+// neighboring pages, empty when there is no neighbor.
+func paginate(files []entry, filter string, page int) ([]entry, string, string) {
+	start := (page - 1) * pageSize
+	if start >= len(files) {
+		start = 0
+		page = 1
+	}
+	end := min(start+pageSize, len(files))
+
+	pageHref := func(p int) string {
+		q := url.Values{}
+		if filter != "all" {
+			q.Set("filter", filter)
+		}
+		if p > 1 {
+			q.Set("page", strconv.Itoa(p))
+		}
+		return "?" + q.Encode()
+	}
+	prev, next := "", ""
+	if page > 1 {
+		prev = pageHref(page - 1)
+	}
+	if end < len(files) {
+		next = pageHref(page + 1)
+	}
+	return files[start:end], prev, next
 }
 
 // groupByMonth splits files (already sorted newest-first) into

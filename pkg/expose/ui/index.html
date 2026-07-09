@@ -220,6 +220,11 @@
     border: 1px solid var(--border);
     border-radius: 12px;
   }
+  .pager {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+  }
 </style>
 </head>
 <body data-dir="{{.Path}}">
@@ -262,8 +267,8 @@
     {{range .Entries}}
     <a class="tile" href="{{.Href}}" title="{{.Name}} — {{.ModTime}}">
       <span class="thumb">
-        {{if eq .Kind "image"}}<img loading="lazy" src="{{.Href}}" alt="{{.Name}}">
-        {{else if eq .Kind "video"}}<video preload="metadata" muted playsinline src="{{.Href}}"></video><span class="play">▶</span>
+        {{if eq .Kind "image"}}<img loading="lazy" decoding="async" src="{{.ThumbHref}}" alt="{{.Name}}">
+        {{else if eq .Kind "video"}}{{if $.VideoPoster}}<img loading="lazy" decoding="async" src="{{.ThumbHref}}" alt="{{.Name}}">{{else}}<video preload="none" data-src="{{.Href}}" muted playsinline></video>{{end}}<span class="play">▶</span>
         {{else if eq .Kind "doc"}}<span class="icon">📄</span>
         {{else}}<span class="icon">📦</span>{{end}}
       </span>
@@ -277,6 +282,13 @@
   {{if not .Groups}}{{if not .Dirs}}
   <p class="empty">{{if eq .Filter "all"}}This folder is empty{{else}}No {{.Filter}} in this folder{{end}}</p>
   {{end}}{{end}}
+
+  {{if or .PrevHref .NextHref}}
+  <nav class="pager">
+    {{if .PrevHref}}<a class="chip" href="{{.PrevHref}}">← Newer</a>{{else}}<span></span>{{end}}
+    {{if .NextHref}}<a class="chip" href="{{.NextHref}}">Older →</a>{{end}}
+  </nav>
+  {{end}}
 </main>
 <script>
 (function () {
@@ -297,12 +309,25 @@
     });
   });
 
-  // Preview the middle of each video instead of its (often black) first frame.
-  document.querySelectorAll('.thumb video').forEach(function (v) {
-    v.addEventListener('loadedmetadata', function () {
-      if (isFinite(v.duration) && v.duration > 0) v.currentTime = v.duration / 2;
-    });
-  });
+  // Fallback path when the server has no ffmpeg: <video> tiles start with
+  // preload="none" and only begin loading once scrolled into view, then
+  // seek to the middle of the clip for a representative frame.
+  var lazyVideos = document.querySelectorAll('.thumb video[data-src]');
+  if (lazyVideos.length > 0) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        var v = e.target;
+        io.unobserve(v);
+        v.preload = 'metadata';
+        v.src = v.dataset.src;
+        v.addEventListener('loadedmetadata', function () {
+          if (isFinite(v.duration) && v.duration > 0) v.currentTime = v.duration / 2;
+        });
+      });
+    }, { rootMargin: '200px' });
+    lazyVideos.forEach(function (v) { io.observe(v); });
+  }
 
   document.getElementById('pick').addEventListener('click', function () { input.click(); });
   input.addEventListener('change', function () { upload(input.files); });

@@ -3,21 +3,30 @@ package expose
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// newTestHandler creates a handler serving a temp directory seeded with:
+// newTestServer creates a server for a temp directory seeded with:
 //
 //	hello.txt      ("hello world")
 //	sub/nested.txt ("nested content")
-func newTestHandler(t *testing.T) (http.Handler, string) {
+//
+// The thumbnail cache is isolated per test and ffmpeg is disabled so
+// results do not depend on what is installed on the machine.
+func newTestServer(t *testing.T) (*server, string) {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello world"), 0o644); err != nil {
@@ -29,11 +38,19 @@ func newTestHandler(t *testing.T) (http.Handler, string) {
 	if err := os.WriteFile(filepath.Join(root, "sub", "nested.txt"), []byte("nested content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewHandler(root)
+	s, err := newServer(root)
 	if err != nil {
-		t.Fatalf("NewHandler(%q) failed: %v", root, err)
+		t.Fatalf("newServer(%q) failed: %v", root, err)
 	}
-	return h, root
+	s.thumbDir = t.TempDir()
+	s.ffmpeg, s.ffprobe = "", ""
+	return s, root
+}
+
+func newTestHandler(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	s, root := newTestServer(t)
+	return s.routes(), root
 }
 
 func multipartBody(t *testing.T, fields map[string]string) (*bytes.Buffer, string) {
@@ -492,11 +509,253 @@ func TestMediaRendersInlinePreviews(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<img loading="lazy" src="/photo.jpg"`) {
-		t.Error("image entry missing inline <img> thumbnail")
+	if !strings.Contains(body, `src="/api/thumb?path=%2Fphoto.jpg"`) {
+		t.Error("image entry missing thumbnail <img> pointing at /api/thumb")
 	}
-	if !strings.Contains(body, `src="/video.mp4"`) || !strings.Contains(body, "<video") {
-		t.Error("video entry missing inline <video> preview")
+	// Without ffmpeg, videos fall back to a lazily loaded <video> element.
+	if !strings.Contains(body, `<video preload="none" data-src="/video.mp4"`) {
+		t.Error("video entry missing lazy <video> preview")
+	}
+}
+
+func TestVideoTileUsesPosterWhenFFmpegPresent(t *testing.T) {
+	s, root := newTestServer(t)
+	s.ffmpeg = "/usr/bin/ffmpeg" // only affects template output; nothing is executed
+	seedMedia(t, root)
+	rec := httptest.NewRecorder()
+	s.routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `src="/api/thumb?path=%2Fvideo.mp4"`) {
+		t.Error("video entry should use a static poster <img> when ffmpeg is available")
+	}
+	if strings.Contains(body, "<video") {
+		t.Error("no <video> elements expected when posters are available")
+	}
+}
+
+// writePNG writes a w x h PNG image to path.
+func writePNG(t *testing.T, path string, w, h int) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func getThumb(t *testing.T, h http.Handler, urlPath string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/thumb?path="+url.QueryEscape(urlPath), nil))
+	return rec
+}
+
+func TestThumbDownscalesImage(t *testing.T) {
+	s, root := newTestServer(t)
+	writePNG(t, filepath.Join(root, "big.png"), 800, 600)
+	rec := getThumb(t, s.routes(), "/big.png")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=86400") {
+		t.Errorf("thumb Cache-Control = %q, want long max-age", cc)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("thumbnail is not a valid JPEG: %v", err)
+	}
+	if got := img.Bounds(); got.Dx() != 320 || got.Dy() != 240 {
+		t.Errorf("thumbnail size = %dx%d, want 320x240", got.Dx(), got.Dy())
+	}
+}
+
+func TestThumbIsCachedOnDisk(t *testing.T) {
+	s, root := newTestServer(t)
+	writePNG(t, filepath.Join(root, "big.png"), 800, 600)
+	h := s.routes()
+
+	if rec := getThumb(t, h, "/big.png"); rec.Code != http.StatusOK {
+		t.Fatalf("first request: status = %d, want 200", rec.Code)
+	}
+	cache, err := os.ReadDir(s.thumbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cache) != 1 {
+		t.Fatalf("thumb cache has %d entries, want 1", len(cache))
+	}
+	first, err := os.Stat(filepath.Join(s.thumbDir, cache[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := getThumb(t, h, "/big.png"); rec.Code != http.StatusOK {
+		t.Fatalf("second request: status = %d, want 200", rec.Code)
+	}
+	second, err := os.Stat(filepath.Join(s.thumbDir, cache[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.ModTime().Equal(first.ModTime()) {
+		t.Error("cached thumbnail was regenerated on the second request")
+	}
+}
+
+func TestThumbFallsBackToOriginalOnDecodeFailure(t *testing.T) {
+	s, root := newTestServer(t)
+	// A .jpg that is not actually a JPEG (stands in for HEIC and friends).
+	if err := os.WriteFile(filepath.Join(root, "fake.jpg"), []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := getThumb(t, s.routes(), "/fake.jpg")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "not an image" {
+		t.Error("expected the original file bytes as fallback")
+	}
+}
+
+func TestThumbMissingFileReturns404(t *testing.T) {
+	h, _ := newTestHandler(t)
+	if rec := getThumb(t, h, "/nope.jpg"); rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestThumbVideoWithoutFFmpegReturns404(t *testing.T) {
+	s, root := newTestServer(t)
+	seedMedia(t, root)
+	if rec := getThumb(t, s.routes(), "/video.mp4"); rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when ffmpeg is unavailable", rec.Code)
+	}
+}
+
+func TestThumbSize(t *testing.T) {
+	cases := []struct {
+		w, h, wantW, wantH int
+	}{
+		{800, 600, 320, 240},
+		{600, 800, 240, 320},
+		{100, 50, 100, 50}, // never upscale
+		{320, 320, 320, 320},
+		{4000, 10, 320, 1},
+	}
+	for _, c := range cases {
+		if w, h := thumbSize(c.w, c.h); w != c.wantW || h != c.wantH {
+			t.Errorf("thumbSize(%d, %d) = %dx%d, want %dx%d", c.w, c.h, w, h, c.wantW, c.wantH)
+		}
+	}
+}
+
+func TestPagination(t *testing.T) {
+	h, root := newTestHandler(t)
+	base := time.Now().Add(-time.Hour)
+	for i := 1; i <= 120; i++ {
+		name := fmt.Sprintf("img%03d.jpg", i)
+		p := filepath.Join(root, name)
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := base.Add(-time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?filter=photos", nil))
+	body := rec.Body.String()
+	for _, want := range []string{"img001.jpg", "img100.jpg", "sub"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page 1 missing %q", want)
+		}
+	}
+	if strings.Contains(body, "img101.jpg") {
+		t.Error("page 1 leaked entries beyond the page size")
+	}
+	if !strings.Contains(body, `href="?filter=photos&amp;page=2"`) {
+		t.Error("page 1 missing link to page 2")
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?filter=photos&page=2", nil))
+	body = rec.Body.String()
+	for _, want := range []string{"img101.jpg", "img120.jpg"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page 2 missing %q", want)
+		}
+	}
+	if strings.Contains(body, "img001.jpg") {
+		t.Error("page 2 shows entries from page 1")
+	}
+	if strings.Contains(body, "📁 sub/") {
+		t.Error("directories must only be listed on page 1")
+	}
+	if !strings.Contains(body, `href="?filter=photos"`) {
+		t.Error("page 2 missing link back to page 1")
+	}
+}
+
+func TestPaginationOutOfRangeFallsBackToFirstPage(t *testing.T) {
+	h, root := newTestHandler(t)
+	seedMedia(t, root)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?page=99", nil))
+
+	if !strings.Contains(rec.Body.String(), "photo.jpg") {
+		t.Error("out-of-range page should fall back to the first page")
+	}
+}
+
+func TestCacheHeaders(t *testing.T) {
+	h, _ := newTestHandler(t)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/hello.txt", nil))
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=3600") {
+		t.Errorf("file Cache-Control = %q, want max-age=3600", cc)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("listing Cache-Control = %q, want no-cache", cc)
+	}
+}
+
+// TestThumbVideoWithFFmpeg exercises the real ffmpeg poster path.
+// Skipped when ffmpeg is not installed on the machine.
+func TestThumbVideoWithFFmpeg(t *testing.T) {
+	s, root := newTestServer(t)
+	real, err := newServer(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if real.ffmpeg == "" {
+		t.Skip("ffmpeg not installed")
+	}
+	s.ffmpeg, s.ffprobe = real.ffmpeg, real.ffprobe
+
+	// Generate a tiny test clip with ffmpeg itself.
+	clip := filepath.Join(root, "clip.mp4")
+	if out, err := exec.Command(s.ffmpeg, "-v", "error",
+		"-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=10",
+		"-y", clip).CombinedOutput(); err != nil {
+		t.Fatalf("generating test clip: %v: %s", err, out)
+	}
+
+	rec := getThumb(t, s.routes(), "/clip.mp4")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body)
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(rec.Body.Bytes())); err != nil {
+		t.Errorf("video poster is not a valid JPEG: %v", err)
 	}
 }
 

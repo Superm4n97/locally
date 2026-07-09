@@ -10,19 +10,19 @@ make build  # build the `locally` binary
 ## Download
 ### linux
 ```shell
-curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.1.0/locally-linux-amd64
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.2.0/locally-linux-amd64
 chmod +x locally
 sudo rm -rf /home/$USER/bin/locally
 sudo mv ./locally /home/$USER/bin
 ```
 ### darwin
 ```shell
-curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.1.0/locally-darwin-amd64
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.2.0/locally-darwin-amd64
 chmod +x locally
 ```
 ### windows
 ```shell
-curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.1.0/locally-windows-amd64
+curl -L -o locally https://github.com/Superm4n97/locally/releases/download/v0.2.0/locally-windows-amd64
 chmod +x locally
 ```
 ---
@@ -59,6 +59,20 @@ The browser UI is built for photo/video dumps from phones:
   of the clip rather than the (often black) first frame. Covers both iPhone (HEIC, MOV)
   and Android (JPG, MP4, 3GP) formats. Formats the browser cannot decode (e.g. HEIC on
   non-Safari) fall back to an icon.
+* **Fast thumbnails** — the server generates small (~320px) JPEG previews via
+  `/api/thumb?path=...` instead of shipping multi-megabyte originals to the grid, so
+  tiles load in a fraction of the time on phones. Supported without any external
+  dependency for JPEG, PNG, GIF, WebP, BMP and TIFF (HEIC is served as-is). Thumbnails
+  are cached on disk (`~/.cache/locally/thumbs` on Linux) and regenerated only when the
+  source file changes.
+* **Video posters (optional, needs ffmpeg)** — if `ffmpeg` is installed on the host,
+  video tiles become static middle-frame poster images generated server-side: no video
+  data is downloaded by the browser at all. Without ffmpeg, videos lazy-load their
+  preview only when scrolled into view.
+* **Pagination** — listings show 100 files per page with *Newer / Older* links
+  (`?page=N`), keeping huge folders responsive.
+* **Caching** — file and thumbnail responses carry `Cache-Control` headers so revisits
+  and back-navigation are served from the browser cache.
 * **Timeline sorting** — files are sorted newest-first and grouped under sticky
   month headers (e.g. *March 2026*), so the month and year stay visible while you scroll.
 * **Type filters** — chips at the top filter the listing by content type:
