@@ -138,20 +138,15 @@
   .folders .row:hover { background: var(--accent-soft); }
   .folders a {
     flex: 1;
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    display: block;
     min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text);
     text-decoration: none;
     font-size: 0.95rem;
   }
-  .folders a span:first-child {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .folders .meta { color: var(--muted); white-space: nowrap; font-size: 0.85rem; }
   .folders .row-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .icon-btn {
     border: 1px solid transparent;
@@ -381,7 +376,7 @@
   <section id="folders" class="folders">
     {{range .Dirs}}
     <div class="row" data-name="{{.Name}}">
-      <a href="{{.Href}}"><span>📁 {{.Name}}/</span><span class="meta">{{.ModTime}}</span></a>
+      <a href="{{.Href}}"><span>📁 {{.Name}}/</span></a>
       <span class="row-actions">
         <button class="icon-btn rename-folder" type="button" title="Rename">⚙️</button>
         <button class="icon-btn delete-folder" type="button" title="Delete">🗑️</button>
