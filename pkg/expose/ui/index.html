@@ -127,19 +127,139 @@
     overflow: hidden;
     margin-bottom: 20px;
   }
-  .folders a {
+  .folders .row {
     display: flex;
-    justify-content: space-between;
+    align-items: center;
     gap: 12px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
+  }
+  .folders .row:last-child { border-bottom: none; }
+  .folders .row:hover { background: var(--accent-soft); }
+  .folders a {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
     color: var(--text);
     text-decoration: none;
     font-size: 0.95rem;
   }
-  .folders a:last-child { border-bottom: none; }
-  .folders a:hover { background: var(--accent-soft); }
+  .folders a span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .folders .meta { color: var(--muted); white-space: nowrap; font-size: 0.85rem; }
+  .folders .row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .icon-btn {
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    font-size: 1rem;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    line-height: 1;
+    transition: background .15s, border-color .15s, transform .1s;
+  }
+  .icon-btn:active { transform: scale(0.92); }
+  .icon-btn.rename-folder { background: rgba(217, 119, 6, .12); }
+  .icon-btn.rename-folder:hover { background: rgba(217, 119, 6, .22); border-color: rgba(217, 119, 6, .4); }
+  .icon-btn.delete-folder { background: rgba(220, 38, 38, .12); }
+  .icon-btn.delete-folder:hover { background: rgba(220, 38, 38, .22); border-color: rgba(220, 38, 38, .4); }
+  .new-folder-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+  }
+  .btn-secondary {
+    padding: 7px 14px;
+    font-size: 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .btn-secondary:hover { border-color: var(--accent); }
+
+  .modal-overlay[hidden] { display: none; }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 12, 16, 0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 100;
+    transition: background .18s ease;
+  }
+  .modal-overlay.show { background: rgba(10, 12, 16, .5); }
+  .modal {
+    width: 100%;
+    max-width: 380px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.25);
+    transform: translateY(8px) scale(.97);
+    opacity: 0;
+    transition: transform .18s ease, opacity .18s ease;
+  }
+  .modal-overlay.show .modal { transform: translateY(0) scale(1); opacity: 1; }
+  .modal-title {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .modal-message {
+    margin: 0 0 14px;
+    font-size: 0.92rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+  .modal-input {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+  .modal-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .btn-primary {
+    padding: 8px 18px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-primary.btn-danger { background: var(--danger); }
 
   .month {
     position: sticky;
@@ -253,12 +373,24 @@
     <p id="status" class="status"></p>
   </section>
 
+  <div class="new-folder-row">
+    <button id="new-folder" class="btn-secondary" type="button">📁+ New folder</button>
+  </div>
+
   {{if .Dirs}}
-  <section class="folders">
+  <section id="folders" class="folders">
     {{range .Dirs}}
-    <a href="{{.Href}}"><span>📁 {{.Name}}/</span><span class="meta">{{.ModTime}}</span></a>
+    <div class="row" data-name="{{.Name}}">
+      <a href="{{.Href}}"><span>📁 {{.Name}}/</span><span class="meta">{{.ModTime}}</span></a>
+      <span class="row-actions">
+        <button class="icon-btn rename-folder" type="button" title="Rename">⚙️</button>
+        <button class="icon-btn delete-folder" type="button" title="Delete">🗑️</button>
+      </span>
+    </div>
     {{end}}
   </section>
+  {{else}}
+  <section id="folders" class="folders" hidden></section>
   {{end}}
 
   {{range .Groups}}
@@ -290,6 +422,18 @@
   </nav>
   {{end}}
 </main>
+
+<div id="modal-overlay" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modal-title" class="modal-title"></h3>
+    <p id="modal-message" class="modal-message"></p>
+    <input id="modal-input" class="modal-input" type="text" hidden>
+    <div class="modal-actions">
+      <button id="modal-cancel" class="btn-secondary" type="button">Cancel</button>
+      <button id="modal-confirm" class="btn-primary" type="button">OK</button>
+    </div>
+  </div>
+</div>
 <script>
 (function () {
   var dir = document.body.dataset.dir;
@@ -371,6 +515,138 @@
       status.textContent = 'Upload failed: network error';
     });
     xhr.send(form);
+  }
+
+  // Custom modal replacing prompt()/confirm()/alert() for folder actions.
+  function showModal(opts) {
+    var overlay = document.getElementById('modal-overlay');
+    var titleEl = document.getElementById('modal-title');
+    var msgEl = document.getElementById('modal-message');
+    var inputEl = document.getElementById('modal-input');
+    var cancelBtn = document.getElementById('modal-cancel');
+    var confirmBtn = document.getElementById('modal-confirm');
+
+    return new Promise(function (resolve) {
+      titleEl.textContent = opts.title || '';
+
+      if (opts.message) {
+        msgEl.textContent = opts.message;
+        msgEl.hidden = false;
+      } else {
+        msgEl.hidden = true;
+      }
+
+      if (opts.input) {
+        inputEl.hidden = false;
+        inputEl.value = opts.value || '';
+        inputEl.placeholder = opts.placeholder || '';
+      } else {
+        inputEl.hidden = true;
+      }
+
+      confirmBtn.textContent = opts.confirmText || 'OK';
+      confirmBtn.className = 'btn-primary' + (opts.danger ? ' btn-danger' : '');
+      cancelBtn.hidden = !!opts.alertOnly;
+
+      overlay.hidden = false;
+      requestAnimationFrame(function () { overlay.classList.add('show'); });
+      if (opts.input) {
+        inputEl.focus();
+        inputEl.select();
+      } else {
+        confirmBtn.focus();
+      }
+
+      function close(result) {
+        overlay.classList.remove('show');
+        setTimeout(function () { overlay.hidden = true; }, 150);
+        confirmBtn.removeEventListener('click', onConfirm);
+        cancelBtn.removeEventListener('click', onCancel);
+        overlay.removeEventListener('mousedown', onOverlay);
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      }
+      function onConfirm() { close(opts.input ? inputEl.value : true); }
+      function onCancel() { close(null); }
+      function onOverlay(e) { if (e.target === overlay && !opts.alertOnly) onCancel(); }
+      function onKey(e) {
+        if (e.key === 'Escape' && !opts.alertOnly) onCancel();
+        else if (e.key === 'Enter') onConfirm();
+      }
+      confirmBtn.addEventListener('click', onConfirm);
+      cancelBtn.addEventListener('click', onCancel);
+      overlay.addEventListener('mousedown', onOverlay);
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  function notifyError(title, err) {
+    showModal({ title: title, message: err.message, confirmText: 'OK', alertOnly: true, danger: true });
+  }
+
+  document.getElementById('new-folder').addEventListener('click', function () {
+    showModal({
+      title: '📁 New folder',
+      input: true,
+      placeholder: 'Folder name',
+      confirmText: 'Create'
+    }).then(function (name) {
+      if (!name) return;
+      return fetch('/api/folder/create?dir=' + encodeURIComponent(dir) + '&name=' + encodeURIComponent(name), {
+        method: 'POST'
+      }).then(function (res) {
+        if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
+        location.reload();
+      });
+    }).catch(function (err) {
+      notifyError('Could not create folder', err);
+    });
+  });
+
+  var folders = document.getElementById('folders');
+  if (folders) {
+    folders.addEventListener('click', function (e) {
+      var row = e.target.closest('.row');
+      if (!row) return;
+      var name = row.dataset.name;
+      var folderPath = dir.replace(/\/+$/, '') + '/' + name;
+
+      if (e.target.closest('.rename-folder')) {
+        showModal({
+          title: '⚙️ Rename folder',
+          input: true,
+          value: name,
+          confirmText: 'Rename'
+        }).then(function (newName) {
+          if (!newName || newName === name) return;
+          return fetch('/api/folder/rename?path=' + encodeURIComponent(folderPath) + '&name=' + encodeURIComponent(newName), {
+            method: 'POST'
+          }).then(function (res) {
+            if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
+            location.reload();
+          });
+        }).catch(function (err) {
+          notifyError('Could not rename folder', err);
+        });
+      } else if (e.target.closest('.delete-folder')) {
+        showModal({
+          title: '🗑️ Delete folder',
+          message: 'Delete "' + name + '" and everything inside it? This cannot be undone.',
+          confirmText: 'Delete',
+          danger: true
+        }).then(function (confirmed) {
+          if (!confirmed) return;
+          return fetch('/api/folder/delete?path=' + encodeURIComponent(folderPath), {
+            method: 'POST'
+          }).then(function (res) {
+            if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
+            location.reload();
+          });
+        }).catch(function (err) {
+          notifyError('Could not delete folder', err);
+        });
+      }
+    });
   }
 })();
 </script>

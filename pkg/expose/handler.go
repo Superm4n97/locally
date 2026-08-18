@@ -93,6 +93,9 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/thumb", s.handleThumb)
+	mux.HandleFunc("/api/folder/create", s.handleFolderCreate)
+	mux.HandleFunc("/api/folder/rename", s.handleFolderRename)
+	mux.HandleFunc("/api/folder/delete", s.handleFolderDelete)
 	mux.HandleFunc("/", s.handleBrowse)
 	return mux
 }
@@ -373,6 +376,113 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(uploadResult{Saved: saved}); err != nil {
 		klog.Errorf("failed to write upload response: %v", err)
+	}
+}
+
+type folderResult struct {
+	Name string `json:"name"`
+	Href string `json:"href"`
+}
+
+// handleFolderCreate makes a new subdirectory inside ?dir=.
+func (s *server) handleFolderCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	parentURL := r.URL.Query().Get("dir")
+	parent := s.resolve(parentURL)
+	if info, err := os.Stat(parent); err != nil || !info.IsDir() {
+		http.Error(w, "parent directory not found", http.StatusNotFound)
+		return
+	}
+	name := sanitizeFilename(r.URL.Query().Get("name"))
+	if name == "" {
+		http.Error(w, "invalid folder name", http.StatusBadRequest)
+		return
+	}
+	target := filepath.Join(parent, name)
+	if _, err := os.Stat(target); err == nil {
+		http.Error(w, "a file or folder with that name already exists", http.StatusConflict)
+		return
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		http.Error(w, "failed to create folder: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	klog.Infof("created folder %s in %s", name, parent)
+
+	href := (&url.URL{Path: path.Join(path.Clean("/"+parentURL), name)}).EscapedPath()
+	writeJSON(w, folderResult{Name: name, Href: href})
+}
+
+// handleFolderRename renames the directory at ?path= to ?name= within the
+// same parent directory.
+func (s *server) handleFolderRename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	srcURL := r.URL.Query().Get("path")
+	src := s.resolve(srcURL)
+	if src == s.root {
+		http.Error(w, "cannot rename the root folder", http.StatusBadRequest)
+		return
+	}
+	if info, err := os.Stat(src); err != nil || !info.IsDir() {
+		http.Error(w, "folder not found", http.StatusNotFound)
+		return
+	}
+	name := sanitizeFilename(r.URL.Query().Get("name"))
+	if name == "" {
+		http.Error(w, "invalid folder name", http.StatusBadRequest)
+		return
+	}
+	parent := filepath.Dir(src)
+	target := filepath.Join(parent, name)
+	if _, err := os.Stat(target); err == nil {
+		http.Error(w, "a file or folder with that name already exists", http.StatusConflict)
+		return
+	}
+	if err := os.Rename(src, target); err != nil {
+		http.Error(w, "failed to rename folder: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	klog.Infof("renamed folder %s to %s", src, target)
+
+	parentURL := path.Dir(path.Clean("/" + srcURL))
+	href := (&url.URL{Path: path.Join(parentURL, name)}).EscapedPath()
+	writeJSON(w, folderResult{Name: name, Href: href})
+}
+
+// handleFolderDelete removes the directory at ?path= and everything in it.
+func (s *server) handleFolderDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	targetURL := r.URL.Query().Get("path")
+	target := s.resolve(targetURL)
+	if target == s.root {
+		http.Error(w, "cannot delete the root folder", http.StatusBadRequest)
+		return
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		http.Error(w, "folder not found", http.StatusNotFound)
+		return
+	}
+	if err := os.RemoveAll(target); err != nil {
+		http.Error(w, "failed to delete folder: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	klog.Infof("deleted folder %s", target)
+	writeJSON(w, folderResult{})
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		klog.Errorf("failed to write json response: %v", err)
 	}
 }
 
